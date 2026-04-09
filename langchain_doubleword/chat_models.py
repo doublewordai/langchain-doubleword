@@ -191,13 +191,26 @@ class ChatDoublewordBatch(ChatDoubleword):
 
     def _generate(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
-            "ChatDoublewordBatch is async-only. Use `ainvoke` / `astream` / "
-            "`abatch` from an async context (e.g. an async LangGraph node). "
-            "If you need a synchronous chat model, use `ChatDoubleword` "
-            "instead."
+            "ChatDoublewordBatch is async-only. Use `ainvoke` / `abatch` from "
+            "an async context (e.g. an async LangGraph node). If you need a "
+            "synchronous chat model, use `ChatDoubleword` instead."
         )
 
     def _stream(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(
-            "ChatDoublewordBatch is async-only. Use `astream` instead."
+            "ChatDoublewordBatch does not support streaming. Batch results "
+            "return all at once when the batch completes — there is nothing "
+            "to stream incrementally. Use `ChatDoubleword` for streaming, or "
+            "`ainvoke` / `abatch` for batched inference."
         )
+
+    async def _astream(self, *args: Any, **kwargs: Any) -> Any:
+        raise NotImplementedError(
+            "ChatDoublewordBatch does not support streaming. Batch results "
+            "return all at once when the batch completes — there is nothing "
+            "to stream incrementally. Use `ChatDoubleword` for streaming, or "
+            "`ainvoke` / `abatch` for batched inference."
+        )
+        # Make this an async generator so langchain-core's runtime checks
+        # against AsyncIterator are satisfied. Unreachable.
+        yield  # type: ignore[unreachable]
