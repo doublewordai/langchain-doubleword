@@ -7,7 +7,7 @@ Mirrors :mod:`langchain_doubleword.chat_models`: a real-time
 Doubleword's batch embeddings endpoint.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.utils import from_env
 from langchain_openai.embeddings.base import OpenAIEmbeddings
@@ -49,6 +49,35 @@ class DoublewordEmbeddingsBatch(DoublewordEmbeddings):
     Use ``aembed_query`` / ``aembed_documents`` from async code.
     """
 
+    batch_size: int = Field(
+        default=1000,
+        description=(
+            "Submit a batch when this many requests have been queued. "
+            "Forwarded to autobatcher.BatchOpenAI."
+        ),
+    )
+    batch_window_seconds: float = Field(
+        default=10.0,
+        description=(
+            "Submit a batch after this many seconds even if `batch_size` "
+            "is not reached. Forwarded to autobatcher.BatchOpenAI."
+        ),
+    )
+    poll_interval_seconds: float = Field(
+        default=5.0,
+        description=(
+            "How often autobatcher polls Doubleword's batch endpoint for "
+            "completion. Forwarded to autobatcher.BatchOpenAI."
+        ),
+    )
+    completion_window: Literal["24h", "1h"] = Field(
+        default="24h",
+        description=(
+            "Doubleword batch completion window. '1h' is more expensive "
+            "but completes faster. Forwarded to autobatcher.BatchOpenAI."
+        ),
+    )
+
     @model_validator(mode="after")
     def _install_autobatcher(self) -> "DoublewordEmbeddingsBatch":
         from autobatcher import BatchOpenAI
@@ -63,6 +92,10 @@ class DoublewordEmbeddingsBatch(DoublewordEmbeddings):
         client_kwargs: dict[str, Any] = {
             "api_key": api_key,
             "base_url": self.openai_api_base,
+            "batch_size": self.batch_size,
+            "batch_window_seconds": self.batch_window_seconds,
+            "poll_interval_seconds": self.poll_interval_seconds,
+            "completion_window": self.completion_window,
         }
         if self.request_timeout is not None:
             client_kwargs["timeout"] = self.request_timeout

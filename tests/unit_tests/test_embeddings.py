@@ -73,3 +73,27 @@ def test_batch_sync_embed_raises() -> None:
         emb.embed_query("hi")
     with pytest.raises(NotImplementedError, match="async-only"):
         emb.embed_documents(["hi"])
+
+
+def test_batch_default_autobatcher_config() -> None:
+    emb = DoublewordEmbeddingsBatch(model="text-embed", api_key="x")
+    assert emb.batch_size == 1000
+    assert emb.batch_window_seconds == 10.0
+    assert emb.poll_interval_seconds == 5.0
+    assert emb.completion_window == "24h"
+
+
+def test_batch_autobatcher_config_propagates_to_client() -> None:
+    emb = DoublewordEmbeddingsBatch(
+        model="text-embed",
+        api_key="x",
+        batch_size=500,
+        batch_window_seconds=3.0,
+        poll_interval_seconds=2.0,
+        completion_window="1h",
+    )
+    client = emb.async_client._client
+    assert client._batch_size == 500
+    assert client._batch_window_seconds == 3.0
+    assert client._poll_interval_seconds == 2.0
+    assert client._completion_window == "1h"

@@ -105,3 +105,38 @@ def test_batch_inherits_doubleword_defaults(
     monkeypatch.setenv("DOUBLEWORD_API_KEY", "test-key")
     llm = ChatDoublewordBatch(model="m")
     assert llm.openai_api_base == "https://api.doubleword.ai/v1"
+
+
+def test_batch_default_autobatcher_config() -> None:
+    llm = ChatDoublewordBatch(model="m", api_key="x")
+    assert llm.batch_size == 1000
+    assert llm.batch_window_seconds == 10.0
+    assert llm.poll_interval_seconds == 5.0
+    assert llm.completion_window == "24h"
+
+
+def test_batch_autobatcher_config_propagates_to_client() -> None:
+    llm = ChatDoublewordBatch(
+        model="m",
+        api_key="x",
+        batch_size=250,
+        batch_window_seconds=2.5,
+        poll_interval_seconds=1.0,
+        completion_window="1h",
+    )
+    client = llm.root_async_client
+    assert client._batch_size == 250
+    assert client._batch_window_seconds == 2.5
+    assert client._poll_interval_seconds == 1.0
+    assert client._completion_window == "1h"
+
+
+def test_batch_completion_window_validates() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ChatDoublewordBatch(
+            model="m",
+            api_key="x",
+            completion_window="48h",  # type: ignore[arg-type]
+        )

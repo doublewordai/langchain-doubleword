@@ -93,6 +93,28 @@ async def main():
 asyncio.run(main())
 ```
 
+#### Tuning autobatcher
+
+Four `autobatcher.BatchOpenAI` knobs are exposed as constructor arguments:
+
+| Argument                | Default | Purpose                                                              |
+|-------------------------|---------|----------------------------------------------------------------------|
+| `batch_size`            | `1000`  | Submit a batch when this many requests are queued.                   |
+| `batch_window_seconds`  | `10.0`  | Submit a batch after this many seconds even if the size cap is not reached. |
+| `poll_interval_seconds` | `5.0`   | How often autobatcher polls for batch completion.                    |
+| `completion_window`     | `"24h"` | Doubleword batch completion window. `"1h"` is more expensive but faster. |
+
+```python
+llm = ChatDoublewordBatch(
+    model="your-model",
+    batch_size=250,           # smaller batches for fast-turnaround LangGraph nodes
+    batch_window_seconds=2.5, # don't make latency-sensitive calls wait 10s
+    completion_window="1h",   # pay more, finish quicker
+)
+```
+
+The same arguments are available on `DoublewordEmbeddingsBatch`.
+
 ## Embeddings
 
 ```python
