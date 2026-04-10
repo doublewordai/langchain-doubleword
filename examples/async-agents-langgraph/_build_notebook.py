@@ -83,7 +83,6 @@ import asyncio
 import json
 import os
 import time
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, TypedDict
 
@@ -105,7 +104,6 @@ from prompts import ROOT_AGENT_SYSTEM, SUB_AGENT_SYSTEM
 from tools.search import search as serper_search, format_results_for_context
 from tools.scrape import fetch_urls
 
-assert os.environ.get("SERPER_API_KEY"), "SERPER_API_KEY must be set"
         """
     ),
     # ------------------------------------------------------------------
@@ -145,7 +143,7 @@ collator doesn't sit around waiting after the last in-flight call returns.
 llm = ChatDoublewordBatch(
     model=MODEL,
     temperature=0,
-    max_tokens=16384,
+    max_tokens=4096,
     completion_window="1h",
     batch_window_seconds=2.5,
 )
@@ -188,7 +186,7 @@ def search(query: str, max_results: int = 5) -> str:
 def read_pages(urls: list[str]) -> str:
     """Read one or more web pages in parallel.
 
-    Returns each page's content as markdown text (truncated to 15000 chars
+    Returns each page's content as markdown text (truncated to 4000 chars
     each). Pass ALL the URLs you want to read in a single call — they are
     fetched simultaneously.
     """
@@ -199,7 +197,7 @@ def read_pages(urls: list[str]) -> str:
     for url in urls:
         content = fetched.get(url)
         if content:
-            pages.append({"url": url, "content": content[:15000]})
+            pages.append({"url": url, "content": content[:4000]})
         else:
             pages.append({"url": url, "error": f"Failed to fetch {url}"})
     return json.dumps({"pages": pages})
@@ -291,38 +289,47 @@ def build_initial_messages(topic: str, is_root: bool) -> list[BaseMessage]:
 ## Session registry
 
 Every agent in a research session — root, sub, sub-sub — registers itself in
-a session-wide dict held in a `ContextVar`. This is what makes
-`reference_findings` work: a sub-agent can look up another agent by ID and
-read its completed findings without that information being plumbed through
-the LangGraph state.
-
-Why a `ContextVar` and not a module global? Two reasons:
-
-- **Async-safe**. Inside a single `asyncio.gather` fan-out, every spawned
-  task gets the same registry by reference (mutations propagate to siblings),
-  but separate notebook runs in the same kernel get fresh registries.
-- **No global pollution**. Re-running the run cell starts a fresh registry
-  rather than accumulating stale entries from previous runs.
+a notebook-wide dict. This is what makes `reference_findings` work: a
+sub-agent can look up another agent by ID and read its completed findings
+without that information being plumbed through the LangGraph state.
 
 The registry also feeds the **per-event log** during the run and the **final
 tree print** + **`agent-tree.json` / `summary.json` files** afterwards.
+
+This is just a module-level dict — not a `ContextVar`. The `ContextVar`
+abstraction would isolate the registry per-async-task, which sounds tidy
+but actively breaks the notebook flow: Jupyter's top-level `await` runs
+each cell in its own context, so a `ContextVar.set()` inside `run_research`
+wouldn't propagate back to the cell that prints the final tree, and
+`SESSION_REGISTRY.get()` would raise `LookupError`. A plain dict mutated
+in place is what we actually want here.
         """
     ),
     code(
         '''
-SESSION_REGISTRY: ContextVar[dict] = ContextVar("session_registry")
-SESSION_START: ContextVar[float] = ContextVar("session_start")
+SESSION_REGISTRY: dict = {}
+SESSION_START: float = 0.0
 
 
 def _registry() -> dict:
-    return SESSION_REGISTRY.get()
+    return SESSION_REGISTRY
+
+
+def _elapsed() -> float:
+    return time.monotonic() - SESSION_START
+
+
+def _reset_session() -> None:
+    """Clear the registry in place and reset the session start time."""
+    global SESSION_START
+    SESSION_REGISTRY.clear()
+    SESSION_START = time.monotonic()
 
 
 def _next_agent_id(prefix: str) -> str:
     """Generate sequential agent IDs from a counter stored in the registry."""
-    registry = _registry()
-    n = registry.get("_id_counter", 0)
-    registry["_id_counter"] = n + 1
+    n = SESSION_REGISTRY.get("_id_counter", 0)
+    SESSION_REGISTRY["_id_counter"] = n + 1
     return f"{prefix}-{n}"
 
 
@@ -333,7 +340,7 @@ def register_agent(
     is_root: bool,
     topic: str,
 ) -> None:
-    _registry()[agent_id] = {
+    SESSION_REGISTRY[agent_id] = {
         "agent_id": agent_id,
         "parent_id": parent_id,
         "depth": depth,
@@ -343,22 +350,20 @@ def register_agent(
         "findings": "",
         "sources": [],
         "iterations": 0,
-        "started_at": time.monotonic() - SESSION_START.get(),
+        "started_at": _elapsed(),
         "completed_at": None,
     }
 
 
 def update_agent(agent_id: str, **fields) -> None:
-    registry = _registry()
-    if agent_id in registry:
-        registry[agent_id].update(fields)
+    if agent_id in SESSION_REGISTRY:
+        SESSION_REGISTRY[agent_id].update(fields)
 
 
 def build_session_context(for_agent_id: str) -> str:
     """Build the 'Other agents in this session' block injected into model calls."""
-    registry = _registry()
     lines = ["Other agents in this research session:"]
-    for aid, entry in registry.items():
+    for aid, entry in SESSION_REGISTRY.items():
         if aid.startswith("_") or aid == for_agent_id:
             continue
         has_findings = "yes" if entry.get("findings") else "no"
@@ -378,12 +383,10 @@ def build_session_context(for_agent_id: str) -> str:
 
 def log_event(agent_id: str, msg: str) -> None:
     """Print a one-line log entry, indented by the agent's depth."""
-    registry = _registry()
-    entry = registry.get(agent_id, {})
+    entry = SESSION_REGISTRY.get(agent_id, {})
     depth = entry.get("depth", 0)
-    elapsed = time.monotonic() - SESSION_START.get()
     indent = "  " * depth
-    print(f"[{elapsed:6.1f}s] {indent}{agent_id:14s} {msg}", flush=True)
+    print(f"[{_elapsed():6.1f}s] {indent}{agent_id:14s} {msg}", flush=True)
         '''
     ),
     # ------------------------------------------------------------------
@@ -511,7 +514,7 @@ async def model_node(state: AgentState) -> dict:
             state["agent_id"],
             status="completed",
             findings=response.content or "",
-            completed_at=time.monotonic() - SESSION_START.get(),
+            completed_at=_elapsed(),
         )
     return update
         '''
@@ -561,7 +564,7 @@ async def tools_node(state: AgentState) -> dict:
             for url in urls:
                 content = fetched.get(url)
                 if content:
-                    pages.append({"url": url, "content": content[:15000]})
+                    pages.append({"url": url, "content": content[:4000]})
                     title = content[:100].split("\\n")[0]
                     new_sources.append({"url": url, "title": title})
                 else:
@@ -681,7 +684,7 @@ async def tools_node(state: AgentState) -> dict:
                 state["agent_id"],
                 status="completed",
                 findings=report,
-                completed_at=time.monotonic() - SESSION_START.get(),
+                completed_at=_elapsed(),
             )
             log_event(state["agent_id"], "✓ write_report")
             tool_messages.append(
@@ -770,8 +773,7 @@ Output ONLY the report — no preamble or commentary."""
 
 async def run_research(topic: str) -> dict:
     """Run a full research session with force-complete + synthesis fallback."""
-    SESSION_REGISTRY.set({})
-    SESSION_START.set(time.monotonic())
+    _reset_session()
 
     initial = build_initial_state(topic=topic, is_root=True)
     print(f"Starting research: {topic}")
@@ -789,7 +791,7 @@ async def run_research(topic: str) -> dict:
             entry["status"] = "incomplete"
             if not entry.get("findings"):
                 entry["findings"] = "Max iterations reached before completion."
-            entry["completed_at"] = time.monotonic() - SESSION_START.get()
+            entry["completed_at"] = _elapsed()
 
     # If the root has no report, do one final tools-removed synthesis round.
     if not result.get("report"):
@@ -813,7 +815,7 @@ async def run_research(topic: str) -> dict:
             result["agent_id"],
             status="completed",
             findings=result["report"],
-            completed_at=time.monotonic() - SESSION_START.get(),
+            completed_at=_elapsed(),
         )
 
     return result
@@ -904,7 +906,7 @@ def write_session_files(out_dir: Path) -> None:
         "total_agents": len(agents),
         "by_status": counts,
         "max_depth": max((a.get("depth", 0) for a in agents), default=0),
-        "elapsed_seconds": time.monotonic() - SESSION_START.get(),
+        "elapsed_seconds": _elapsed(),
     }
     with open(out_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
