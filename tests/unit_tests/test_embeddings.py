@@ -61,8 +61,7 @@ def test_batch_installs_autobatcher_client() -> None:
     emb = DoublewordEmbeddingsBatch(model="text-embed", api_key="x")
     parent = getattr(emb.async_client, "_client", None)
     assert isinstance(parent, BatchOpenAI), (
-        "DoublewordEmbeddingsBatch.async_client should be a BatchOpenAI "
-        "embeddings accessor"
+        "DoublewordEmbeddingsBatch.async_client should be a BatchOpenAI embeddings accessor"
     )
     assert emb.client is None
 

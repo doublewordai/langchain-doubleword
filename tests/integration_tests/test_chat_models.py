@@ -67,13 +67,9 @@ def add(a: int, b: int) -> int:
 def test_chat_doubleword_tool_calling_sync() -> None:
     """Real-time chat model should bind tools and emit tool_calls."""
     llm = ChatDoubleword(model=TEST_MODEL, temperature=0).bind_tools([get_weather])
-    response = llm.invoke(
-        [HumanMessage(content="What's the weather in Paris? Use the tool.")]
-    )
+    response = llm.invoke([HumanMessage(content="What's the weather in Paris? Use the tool.")])
     assert isinstance(response, AIMessage)
-    assert response.tool_calls, (
-        f"expected at least one tool call, got: {response!r}"
-    )
+    assert response.tool_calls, f"expected at least one tool call, got: {response!r}"
     call = response.tool_calls[0]
     assert call["name"] == "get_weather"
     assert "city" in call["args"]
@@ -89,9 +85,7 @@ def test_chat_doubleword_tool_calling_sync() -> None:
 
 async def test_chat_doubleword_batch_tool_calling() -> None:
     """Tool calling should work end-to-end through the batch endpoint."""
-    llm = ChatDoublewordBatch(model=TEST_BATCH_MODEL, temperature=0).bind_tools(
-        [get_weather]
-    )
+    llm = ChatDoublewordBatch(model=TEST_BATCH_MODEL, temperature=0).bind_tools([get_weather])
     response = await llm.ainvoke(
         [HumanMessage(content="What's the weather in Tokyo? Use the tool.")]
     )
@@ -117,10 +111,7 @@ async def test_chat_doubleword_batch_concurrent_collation() -> None:
     cities = ["Paris", "Tokyo", "Berlin", "Lisbon", "Cairo"]
 
     responses = await asyncio.gather(
-        *(
-            llm.ainvoke([HumanMessage(content=f"Name one landmark in {city}.")])
-            for city in cities
-        )
+        *(llm.ainvoke([HumanMessage(content=f"Name one landmark in {city}.")]) for city in cities)
     )
 
     assert len(responses) == len(cities)
@@ -136,16 +127,12 @@ async def test_chat_doubleword_batch_tool_calling_concurrent() -> None:
     Combines the two prior tests: parallel ``ainvoke`` calls, each binding a
     tool. Ensures every parallel branch parses tool_calls correctly.
     """
-    llm = ChatDoublewordBatch(model=TEST_BATCH_MODEL, temperature=0).bind_tools(
-        [add]
-    )
+    llm = ChatDoublewordBatch(model=TEST_BATCH_MODEL, temperature=0).bind_tools([add])
     pairs = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10)]
 
     responses = await asyncio.gather(
         *(
-            llm.ainvoke(
-                [HumanMessage(content=f"Use the tool to add {a} and {b}.")]
-            )
+            llm.ainvoke([HumanMessage(content=f"Use the tool to add {a} and {b}.")])
             for a, b in pairs
         )
     )
@@ -153,9 +140,7 @@ async def test_chat_doubleword_batch_tool_calling_concurrent() -> None:
     assert len(responses) == len(pairs)
     for resp, (a, b) in zip(responses, pairs, strict=True):
         assert isinstance(resp, AIMessage)
-        assert resp.tool_calls, (
-            f"missing tool_calls for ({a}, {b}): {resp!r}"
-        )
+        assert resp.tool_calls, f"missing tool_calls for ({a}, {b}): {resp!r}"
         call = resp.tool_calls[0]
         assert call["name"] == "add"
         assert int(call["args"]["a"]) == a

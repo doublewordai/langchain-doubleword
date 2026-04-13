@@ -17,9 +17,7 @@ pytestmark = pytest.mark.skipif(
     reason="DOUBLEWORD_API_KEY not set; skipping integration tests.",
 )
 
-TEST_MODEL = os.environ.get(
-    "DOUBLEWORD_TEST_EMBEDDING_MODEL", "doubleword-embedding"
-)
+TEST_MODEL = os.environ.get("DOUBLEWORD_TEST_EMBEDDING_MODEL", "doubleword-embedding")
 
 
 class TestDoublewordEmbeddingsIntegration(EmbeddingsIntegrationTests):

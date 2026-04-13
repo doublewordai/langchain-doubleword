@@ -28,9 +28,7 @@ class DoublewordEmbeddings(OpenAIEmbeddings):
     )
     openai_api_base: str | None = Field(
         alias="base_url",
-        default_factory=from_env(
-            "DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE
-        ),
+        default_factory=from_env("DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE),
     )
 
     @property
@@ -116,13 +114,9 @@ class DoublewordEmbeddingsBatch(DoublewordEmbeddings):
         return self
 
     def embed_query(self, text: str) -> list[float]:
-        raise NotImplementedError(
-            "DoublewordEmbeddingsBatch is async-only. Use `aembed_query`."
-        )
+        raise NotImplementedError("DoublewordEmbeddingsBatch is async-only. Use `aembed_query`.")
 
-    def embed_documents(
-        self, texts: list[str], chunk_size: int | None = None
-    ) -> list[list[float]]:
+    def embed_documents(self, texts: list[str], chunk_size: int | None = None) -> list[list[float]]:
         raise NotImplementedError(
             "DoublewordEmbeddingsBatch is async-only. Use `aembed_documents`."
         )

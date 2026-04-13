@@ -50,9 +50,7 @@ class ChatDoubleword(BaseChatOpenAI):
     )
     openai_api_base: str | None = Field(
         alias="base_url",
-        default_factory=from_env(
-            "DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE
-        ),
+        default_factory=from_env("DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE),
     )
 
     @property

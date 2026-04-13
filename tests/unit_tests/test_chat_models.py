@@ -37,7 +37,6 @@ class TestChatDoublewordUnit(ChatModelUnitTests):
         )
 
 
-
 def test_default_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DOUBLEWORD_API_BASE", raising=False)
     monkeypatch.setenv("DOUBLEWORD_API_KEY", "test-key")
@@ -70,10 +69,7 @@ def test_lc_namespace() -> None:
 
 def test_llm_type() -> None:
     assert ChatDoubleword(model="m", api_key="x")._llm_type == "doubleword-chat"
-    assert (
-        ChatDoublewordBatch(model="m", api_key="x")._llm_type
-        == "doubleword-chat-batch"
-    )
+    assert ChatDoublewordBatch(model="m", api_key="x")._llm_type == "doubleword-chat-batch"
 
 
 # ---------------------------------------------------------------------------
