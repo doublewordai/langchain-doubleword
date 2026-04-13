@@ -32,15 +32,10 @@ the file at all.
 """
 
 import os
-import sys
+import tomllib
 from pathlib import Path
 
 from pydantic import SecretStr
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 DW_HOME = Path.home() / ".dw"
 CREDENTIALS_FILE = DW_HOME / "credentials.toml"

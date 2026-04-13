@@ -22,7 +22,7 @@ class DoublewordEmbeddings(OpenAIEmbeddings):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    openai_api_key: SecretStr | None = Field(  # type: ignore[assignment]
+    openai_api_key: SecretStr | None = Field(
         alias="api_key",
         default_factory=resolve_api_key,
     )
@@ -85,7 +85,7 @@ class DoublewordEmbeddingsBatch(DoublewordEmbeddings):
             if isinstance(self.openai_api_key, SecretStr):
                 api_key = self.openai_api_key.get_secret_value()
             else:
-                api_key = self.openai_api_key  # type: ignore[assignment]
+                api_key = self.openai_api_key
 
         client_kwargs: dict[str, Any] = {
             "api_key": api_key,
@@ -113,10 +113,12 @@ class DoublewordEmbeddingsBatch(DoublewordEmbeddings):
         self.client = None
         return self
 
-    def embed_query(self, text: str) -> list[float]:
+    def embed_query(self, text: str, **kwargs: Any) -> list[float]:
         raise NotImplementedError("DoublewordEmbeddingsBatch is async-only. Use `aembed_query`.")
 
-    def embed_documents(self, texts: list[str], chunk_size: int | None = None) -> list[list[float]]:
+    def embed_documents(
+        self, texts: list[str], chunk_size: int | None = None, **kwargs: Any
+    ) -> list[list[float]]:
         raise NotImplementedError(
             "DoublewordEmbeddingsBatch is async-only. Use `aembed_documents`."
         )

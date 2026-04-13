@@ -44,7 +44,7 @@ class ChatDoubleword(BaseChatOpenAI):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    openai_api_key: SecretStr | None = Field(  # type: ignore[assignment]
+    openai_api_key: SecretStr | None = Field(
         alias="api_key",
         default_factory=resolve_api_key,
     )
@@ -154,7 +154,7 @@ class ChatDoublewordBatch(ChatDoubleword):
                 api_key = self.openai_api_key.get_secret_value()
             else:
                 # Field allows callables; let BatchOpenAI handle them directly.
-                api_key = self.openai_api_key  # type: ignore[assignment]
+                api_key = self.openai_api_key
 
         client_kwargs: dict[str, Any] = {
             "api_key": api_key,
@@ -211,4 +211,4 @@ class ChatDoublewordBatch(ChatDoubleword):
         )
         # Make this an async generator so langchain-core's runtime checks
         # against AsyncIterator are satisfied. Unreachable.
-        yield  # type: ignore[unreachable]
+        yield
