@@ -1,6 +1,6 @@
 [project]
 name = "langchain-doubleword"
-version = "0.1.1"
+version = "0.2.1"
 description = "An integration package connecting Doubleword and LangChain / LangGraph."
 readme = "README.md"
 license = { text = "MIT" }
