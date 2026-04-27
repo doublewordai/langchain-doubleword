@@ -10,10 +10,12 @@ from importlib import metadata
 from langchain_doubleword.chat_models import (
     DEFAULT_DOUBLEWORD_API_BASE,
     ChatDoubleword,
+    ChatDoublewordAsync,
     ChatDoublewordBatch,
 )
 from langchain_doubleword.embeddings import (
     DoublewordEmbeddings,
+    DoublewordEmbeddingsAsync,
     DoublewordEmbeddingsBatch,
 )
 
@@ -26,8 +28,10 @@ del metadata
 __all__ = [
     "DEFAULT_DOUBLEWORD_API_BASE",
     "ChatDoubleword",
+    "ChatDoublewordAsync",
     "ChatDoublewordBatch",
     "DoublewordEmbeddings",
+    "DoublewordEmbeddingsAsync",
     "DoublewordEmbeddingsBatch",
     "__version__",
 ]
