@@ -115,22 +115,58 @@ llm = ChatDoublewordBatch(
 
 The same arguments are available on `DoublewordEmbeddingsBatch`.
 
+### `ChatDoublewordAsync` (1-hour flex tier)
+
+A thin subclass of `ChatDoublewordBatch` pinned to Doubleword's **flex
+(1-hour)** completion window. Backed by `autobatcher.AsyncOpenAI` rather
+than `BatchOpenAI`. Use this when 24-hour batch turnaround is too slow but
+realtime cost is too high — typical for fan-out workflows that need results
+within minutes-to-an-hour.
+
+```python
+import asyncio
+from langchain_doubleword import ChatDoublewordAsync
+
+llm = ChatDoublewordAsync(model="your-model")  # completion_window="1h" by default
+
+async def main():
+    results = await asyncio.gather(*[
+        llm.ainvoke(f"Summarize chapter {i}") for i in range(50)
+    ])
+    for r in results:
+        print(r.content)
+
+asyncio.run(main())
+```
+
+All the autobatcher tuning knobs above apply unchanged. The only difference
+from `ChatDoublewordBatch` is the default `completion_window` (`"1h"` vs
+`"24h"`); the same `DoublewordEmbeddingsAsync` exists on the embeddings side.
+
 ## Embeddings
 
 ```python
-from langchain_doubleword import DoublewordEmbeddings, DoublewordEmbeddingsBatch
+from langchain_doubleword import (
+    DoublewordEmbeddings,
+    DoublewordEmbeddingsAsync,
+    DoublewordEmbeddingsBatch,
+)
 
 embed = DoublewordEmbeddings(model="your-embedding-model")
 vec = embed.embed_query("hello world")
 
-# Or, transparently batched:
+# Or, transparently batched (24h tier):
 batch_embed = DoublewordEmbeddingsBatch(model="your-embedding-model")
 # vecs = await batch_embed.aembed_documents([...])
+
+# Or on the 1h flex tier:
+async_embed = DoublewordEmbeddingsAsync(model="your-embedding-model")
+# vecs = await async_embed.aembed_documents([...])
 ```
 
 ## Use with LangGraph
 
-`ChatDoubleword` and `ChatDoublewordBatch` are standard `BaseChatModel`
+`ChatDoubleword`, `ChatDoublewordBatch`, and `ChatDoublewordAsync` are all standard `BaseChatModel`
 implementations, so they slot into any LangGraph node:
 
 ```python
