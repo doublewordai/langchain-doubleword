@@ -13,7 +13,7 @@ load_dotenv()
 
 from langchain_doubleword import ChatDoubleword
 
-MODEL = os.environ.get("APP_MODEL", "Qwen/Qwen3.5-9B")
+MODEL = os.environ.get("APP_MODEL", "openai/gpt-oss-20b")
 
 llm = ChatDoubleword(model=MODEL)
 print(llm.invoke("Explain bismuth in three sentences.").content)

@@ -11,10 +11,12 @@ Run two variants to see it work: ``baseline`` uses a healthy system prompt,
     uv run python eval.py --variant baseline -n 50 -c 20
     uv run python eval.py --variant regressed -n 50 -c 20
 
-Everything runs on the batch tier. Generation batches via ``aevaluate(max_concurrency=N)``;
-the judge scores every answer in one batched ``asyncio.gather`` pass; the LangSmith
-evaluator is a pure lookup of those verdicts, so it adds no model calls. Authoritative
-batch cost: the Doubleword console or ``dw batches analytics <batch_id>``.
+Defaults to the batch tier. Generation and judging each run as one batched
+``asyncio.gather`` pass, so the autobatcher collates the calls into a batch; a single
+``aevaluate`` then records each answer and its four judge scores (the target and the
+evaluator are pure lookups, so they add no model calls). The same eval runs on any
+tier — pass ``--tier async`` (1h flex) or ``--tier realtime``. Authoritative batch
+cost: the Doubleword console or ``dw batches analytics <batch_id>``.
 
 Requires DOUBLEWORD_API_KEY and LANGSMITH_API_KEY (see .env.example).
 """
@@ -24,24 +26,40 @@ import argparse
 import asyncio
 import json
 import os
+import re
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_doubleword import ChatDoublewordBatch
+from langchain_doubleword import ChatDoubleword, ChatDoublewordAsync, ChatDoublewordBatch
 from langsmith import Client
 from langsmith.evaluation import aevaluate
 from langsmith.schemas import Example, Run
 
-# The app under test, and the stronger model that grades it. ChatDoublewordAsync (1h tier)
-# is the faster option, ChatDoubleword the real-time one.
-APP_MODEL = os.environ.get("APP_MODEL", "Qwen/Qwen3.5-9B")
+# The app under test, and the stronger model that grades it.
+APP_MODEL = os.environ.get("APP_MODEL", "openai/gpt-oss-20b")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "deepseek-ai/DeepSeek-V4-Pro")
 
-app_model = ChatDoublewordBatch(model=APP_MODEL)
-judge_model = ChatDoublewordBatch(model=JUDGE_MODEL)
+# Cap output so a reasoning model can't run away (unbounded, one of these can emit
+# thousands of tokens per call). Leave enough room for the model to think and still emit
+# its answer / JSON verdict — too low and a reasoning judge spends the whole budget
+# thinking and never returns the JSON.
+MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
+
+# Tier -> chat-model class. batch (24h) is the cheapest, async is the 1-hour flex tier,
+# realtime is the standard endpoint. Every call here uses ``ainvoke``, which all three
+# support, so the same eval runs unchanged on any tier — pick it with --tier.
+TIERS = {
+    "batch": ChatDoublewordBatch,
+    "async": ChatDoublewordAsync,
+    "realtime": ChatDoubleword,
+}
+
+# Assigned in main() once the tier is known.
+app_model = None
+judge_model = None
 
 # Generation prompts. `regressed` is deliberately degraded so the judge scores drop —
 # a stand-in for the kind of prompt change that quietly ships a regression.
@@ -82,6 +100,22 @@ def _add_tokens(bucket: dict, msg) -> None:
     bucket["out"] += usage.get("output_tokens", 0)
 
 
+def _parse_json(text: str | None) -> dict:
+    """Parse the judge's JSON, tolerating a reasoning model wrapping it in prose."""
+    text = text or ""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
 def _load_examples(n: int) -> list[dict]:
     from datasets import load_dataset
 
@@ -100,16 +134,10 @@ def ensure_dataset(client: Client, name: str, n: int) -> None:
     client.create_examples(dataset_id=ds.id, examples=_load_examples(n))
 
 
-def make_target(variant: str):
-    system = SYSTEM_PROMPTS[variant]
-
-    async def target(inputs: dict) -> dict:
-        msg = await app_model.ainvoke([SystemMessage(system), HumanMessage(inputs["question"])])
-        _add_tokens(gen_tokens, msg)
-        generated[inputs["question"]] = msg.content
-        return {"answer": msg.content}
-
-    return target
+async def _generate_one(question: str, system: str) -> None:
+    msg = await app_model.ainvoke([SystemMessage(system), HumanMessage(question)])
+    _add_tokens(gen_tokens, msg)
+    generated[question] = msg.content
 
 
 async def _judge_one(question: str) -> None:
@@ -124,10 +152,7 @@ async def _judge_one(question: str) -> None:
         ]
     )
     _add_tokens(judge_tokens, msg)
-    try:
-        v = json.loads(msg.content or "{}")
-    except json.JSONDecodeError:
-        v = {}
+    v = _parse_json(msg.content)
     verdicts[question] = {
         "relevance": float(v.get("relevance", 0.0)),
         "truthfulness": float(v.get("truthfulness", 0.0)),
@@ -158,40 +183,62 @@ def judged(run: Run, example: Example) -> list[dict]:
     ]
 
 
-async def run_eval(variant: str, n: int, concurrency: int) -> str:
+async def run_eval(variant: str, n: int, concurrency: int, tier: str) -> str:
     client = Client()
     dataset = f"doubleword-regression-{n}"
     ensure_dataset(client, dataset, n)
 
-    # Cache reference answers for the judge (keyed by question).
+    questions: list[str] = []
     for ex in client.list_examples(dataset_name=dataset):
-        references[ex.inputs["question"]] = (ex.outputs or {}).get("answer", "")
+        q = ex.inputs["question"]
+        questions.append(q)
+        references[q] = (ex.outputs or {}).get("answer", "")
 
-    # (a) Batched generation — evaluators=[] so autobatcher just collates the app calls.
-    res = await aevaluate(
-        make_target(variant),
-        data=dataset,
-        evaluators=[],
-        experiment_prefix=f"{APP_MODEL.split('/')[-1]}-{variant}",
-        metadata={"variant": variant, "app_model": APP_MODEL, "judge_model": JUDGE_MODEL},
-        max_concurrency=concurrency,
-    )
+    # Generate, then judge. On batch/async, fire every call at once so the autobatcher
+    # collates them into one batch per stage. On realtime there's no batching, so bound
+    # in-flight calls with a semaphore to avoid hammering the endpoint.
+    sem = asyncio.Semaphore(concurrency) if tier == "realtime" else None
 
-    # (b) One batched judging pass over every generated answer.
-    await asyncio.gather(*[_judge_one(q) for q in generated])
+    async def guard(coro):
+        if sem is None:
+            return await coro
+        async with sem:
+            return await coro
 
-    # (c) Attach the four feedback scores to the same experiment. Passing the experiment
-    #     name runs evaluators over its existing runs — no generation re-run.
-    await aevaluate(res.experiment_name, evaluators=[judged], max_concurrency=concurrency)
-    return res.experiment_name
+    system = SYSTEM_PROMPTS[variant]
+    await asyncio.gather(*[guard(_generate_one(q, system)) for q in questions])
+    await asyncio.gather(*[guard(_judge_one(q)) for q in questions])
+
+    # Record each answer and its four judge scores in one experiment. The target and the
+    # evaluator are pure lookups of the work above, so aevaluate adds no model calls.
+    async def target(inputs: dict) -> dict:
+        return {"answer": generated.get(inputs["question"], "")}
+
+    try:
+        res = await aevaluate(
+            target,
+            data=dataset,
+            evaluators=[judged],
+            experiment_prefix=f"{APP_MODEL.split('/')[-1]}-{variant}",
+            metadata={"variant": variant, "app_model": APP_MODEL, "judge_model": JUDGE_MODEL},
+            max_concurrency=concurrency,
+        )
+        return res.experiment_name
+    except Exception as exc:  # e.g. LangSmith usage limit — scores are still computed below
+        print(f"(LangSmith logging failed: {exc})")
+        return "(not logged)"
 
 
-def main(variant: str, n: int, concurrency: int) -> None:
-    experiment_name = asyncio.run(run_eval(variant, n, concurrency))
+def main(variant: str, n: int, concurrency: int, tier: str) -> None:
+    global app_model, judge_model
+    app_model = TIERS[tier](model=APP_MODEL, max_tokens=MAX_TOKENS)
+    judge_model = TIERS[tier](model=JUDGE_MODEL, max_tokens=MAX_TOKENS)
+
+    experiment_name = asyncio.run(run_eval(variant, n, concurrency, tier))
 
     passed = sum(_passed(v) for v in verdicts.values())
     avg = lambda key: (sum(v[key] for v in verdicts.values()) / len(verdicts)) if verdicts else 0.0
-    print(f"\nVariant: {variant}   Experiment: {experiment_name}")
+    print(f"\nVariant: {variant}   Tier: {tier}   Experiment: {experiment_name}")
     print(
         f"relevance {avg('relevance'):.2f}  |  truthfulness {avg('truthfulness'):.2f}  |  "
         f"tone {avg('tone'):.2f}  |  overall pass {passed}/{len(verdicts)}"
@@ -208,5 +255,7 @@ if __name__ == "__main__":
                         help="generation prompt; 'regressed' is deliberately degraded")
     parser.add_argument("-n", type=int, default=20, help="number of questions")
     parser.add_argument("-c", "--concurrency", type=int, default=20, help="aevaluate max_concurrency")
+    parser.add_argument("--tier", choices=["batch", "async", "realtime"], default="batch",
+                        help="Doubleword tier: batch (24h, cheapest), async (1h flex), or realtime")
     args = parser.parse_args()
-    main(args.variant, args.n, args.concurrency)
+    main(args.variant, args.n, args.concurrency, args.tier)

@@ -70,9 +70,52 @@ evals cheap, use the batched chat model (`ChatDoublewordBatch`) and run with con
 calls collate into batches at Doubleword's batch price.
 
 The most common eval is the one you run every day: an LLM-as-judge scoring your app's outputs so you
-catch prompt or model regressions before they ship. A complete runnable example — judge an app
-against reference answers on the batch tier, then re-run after a change to see the score move — lives
-in [`examples/langsmith`](https://github.com/doublewordai/langchain-doubleword/tree/master/examples/langsmith).
+catch prompt or model regressions before they ship. A complete [runnable example](https://github.com/doublewordai/langchain-doubleword/tree/master/examples/langsmith) judges an app
+against reference answers on the batch tier, then re-run after a change to see the score move. 
+
+![A LangSmith experiment showing the four judge scores averaged across the run](images/experiment_summary.png)
+
+*A 500-example regression eval in LangSmith: `gpt-oss-20b` answers each question and `DeepSeek-V4-Pro`
+grades the answer on relevance, truthfulness, and tone. Re-run after a change and the bars move.*
+
+When a prompt regresses the drop is obvious. The two prompts differ by one instruction set:
+
+- **baseline** — "Answer the question truthfully and concisely. If you are unsure, say so rather than guessing."
+- **regressed** — "You are a confident, entertaining assistant. Always give a definitive, elaborate answer… Never admit uncertainty and never refuse."
+
+The same eval on each, 50 examples over the same questions:
+
+| Prompt | relevance | truthfulness | tone | overall pass |
+|------|------|------|------|------|
+| baseline | 0.97 | 0.75 | 0.92 | 76% |
+| regressed | 0.87 | 0.38 | 0.55 | 34% |
+
+## What it costs
+
+That 500-example run, measured with `dw batches analytics`, cost **$0.44** — $0.061 to generate the
+answers and $0.380 to judge them. In production the answers already exist, so the eval you re-run on
+every change is the judge: about **$0.00076 per trace**.
+
+Priced against the same token volume on a frontier model (GPT-5.5 at $5/$30 per million tokens,
+Claude Opus 4.8 at $5/$25):
+
+**Judge only** — the recurring regression-eval cost:
+
+| Traces judged | Doubleword | GPT-5.5 | Claude Opus 4.8 |
+|------|------|------|------|
+| 1,000 | $0.76 | $5.39 | $4.75 |
+| 100,000 | $76 | $539 | $475 |
+| 1,000,000 | $760 | $5,389 (7.1×) | $4,751 (6.3×) |
+
+**Whole run** — generate plus judge:
+
+| Evals | Doubleword | GPT-5.5 | Claude Opus 4.8 |
+|------|------|------|------|
+| 1,000 | $0.88 | $23.80 | $20.18 |
+| 100,000 | $88 | $2,380 | $2,018 |
+| 1,000,000 | $882 | $23,796 (27×) | $20,182 (23×) |
+
+Figures are from the 1-hour async tier; the 24-hour batch tier is cheaper still.
 
 ## Cost visibility
 
