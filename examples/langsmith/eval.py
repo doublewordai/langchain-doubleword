@@ -15,7 +15,7 @@ Defaults to the batch tier. Generation and judging each run as one batched
 ``asyncio.gather`` pass, so the autobatcher collates the calls into a batch; a single
 ``aevaluate`` then records each answer and its four judge scores (the target and the
 evaluator are pure lookups, so they add no model calls). The same eval runs on any
-tier — pass ``--tier async`` (1h flex) or ``--tier realtime``. Authoritative batch
+tier — pass ``--tier async`` (high-throughput) or ``--tier realtime``. Authoritative batch
 cost: the Doubleword console or ``dw batches analytics <batch_id>``.
 
 Requires DOUBLEWORD_API_KEY and LANGSMITH_API_KEY (see .env.example).
@@ -48,7 +48,7 @@ JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "deepseek-ai/DeepSeek-V4-Pro")
 # thinking and never returns the JSON.
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 
-# Tier -> chat-model class. batch (24h) is the cheapest, async is the 1-hour flex tier,
+# Tier -> chat-model class. batch (24h) is the cheapest, async is the high-throughput tier,
 # realtime is the standard endpoint. Every call here uses ``ainvoke``, which all three
 # support, so the same eval runs unchanged on any tier — pick it with --tier.
 TIERS = {
@@ -256,6 +256,6 @@ if __name__ == "__main__":
     parser.add_argument("-n", type=int, default=20, help="number of questions")
     parser.add_argument("-c", "--concurrency", type=int, default=20, help="aevaluate max_concurrency")
     parser.add_argument("--tier", choices=["batch", "async", "realtime"], default="batch",
-                        help="Doubleword tier: batch (24h, cheapest), async (1h flex), or realtime")
+                        help="Doubleword tier: batch (24h, cheapest), async (high-throughput), or realtime")
     args = parser.parse_args()
     main(args.variant, args.n, args.concurrency, args.tier)
