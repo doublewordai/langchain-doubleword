@@ -1,4 +1,4 @@
-# Catch Prompt and Model Regressions Before They Ship — 7–27× Cheaper with LangSmith and Doubleword
+# LangSmith Evals at Scale: Catch Prompt Regressions for 97% Less with Doubleword
 
 Every prompt tweak or model swap can make your app worse without you realising until unexpected
 outputs appear in production.
