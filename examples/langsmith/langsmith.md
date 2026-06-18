@@ -34,7 +34,7 @@ regression. A complete
 [runnable example](https://github.com/doublewordai/langchain-doubleword/tree/master/examples/langsmith)
 judges an app on the batch tier and re-runs after a change to show the move.
 
-![A LangSmith experiment showing the four judge scores averaged across the run](images/experiment_summary.png)
+![A LangSmith experiment showing the four judge scores averaged across the run](images/05_experiment_summary.png)
 
 *A 500-example regression eval in LangSmith: `gpt-oss-20b` answers each question and `DeepSeek-V4-Pro`
 grades the answer on relevance, truthfulness, and tone. Re-run after a change and the bars move.*
