@@ -143,6 +143,29 @@ All the autobatcher tuning knobs above apply unchanged. The only difference
 from `ChatDoublewordBatch` is the default `completion_window` (`"1h"` vs
 `"24h"`); the same `DoublewordEmbeddingsAsync` exists on the embeddings side.
 
+## Prompt caching
+
+Attach `cache_control` to a message content block; `ChatDoubleword` forwards it
+verbatim, so a large stable prefix is cached and reused across calls:
+
+```python
+from langchain_doubleword import ChatDoubleword
+from langchain_core.messages import SystemMessage, HumanMessage
+
+llm = ChatDoubleword(model="your-model-name")
+
+system = SystemMessage(content=[{
+    "type": "text",
+    "text": "…large, stable instructions…",
+    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+}])
+
+response = llm.invoke([system, HumanMessage(content="What is 2 + 2?")])
+print(response.usage_metadata["input_token_details"]["cache_read"])  # tokens read from cache
+```
+
+See the [prompt caching guide](https://docs.doubleword.ai/inference-api/prompt-caching).
+
 ## Embeddings
 
 ```python

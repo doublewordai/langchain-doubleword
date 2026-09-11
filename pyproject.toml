@@ -98,7 +98,9 @@ filterwarnings = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+# Matches the 3.12 CI runner; numpy's current stubs use 3.12-only `type`
+# syntax that mypy rejects when targeting an older version.
+python_version = "3.12"
 strict = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
