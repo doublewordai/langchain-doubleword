@@ -145,15 +145,43 @@ from `ChatDoublewordBatch` is the default `completion_window` (`"1h"` vs
 
 ## Prompt caching
 
-Attach `cache_control` to a message content block; `ChatDoubleword` forwards it
-verbatim, so a large stable prefix is cached and reused across calls:
+Pass `prompt_cache=True` to cache the system prefix and reuse it across calls:
 
 ```python
 from langchain_doubleword import ChatDoubleword
 from langchain_core.messages import SystemMessage, HumanMessage
 
-llm = ChatDoubleword(model="your-model-name")
+llm = ChatDoubleword(model="your-model-name", prompt_cache=True)
 
+response = llm.invoke([
+    SystemMessage(content="…large, stable instructions…"),
+    HumanMessage(content="What is 2 + 2?"),
+])
+print(response.usage_metadata["input_token_details"]["cache_read"])  # tokens read from cache
+```
+
+`prompt_cache` accepts `True`, `False`, or a config dict:
+
+| Key     | Values                                            | Default    |
+|---------|---------------------------------------------------|------------|
+| `ttl`   | `"5m"`, `"1h"`                                    | `"1h"`     |
+| `scope` | `"system"`, `"lastUser"`, list of message indices | `"system"` |
+
+```python
+llm = ChatDoubleword(
+    model="your-model-name",
+    prompt_cache={"ttl": "5m", "scope": "lastUser"},
+)
+```
+
+The field is named `prompt_cache` because LangChain already uses `cache` for its
+own response cache. `ChatDoublewordBatch` and `ChatDoublewordAsync` inherit it
+unchanged.
+
+To mark one specific message instead, attach `cache_control` to a content block
+yourself; `ChatDoubleword` forwards it verbatim:
+
+```python
 system = SystemMessage(content=[{
     "type": "text",
     "text": "…large, stable instructions…",
@@ -161,7 +189,6 @@ system = SystemMessage(content=[{
 }])
 
 response = llm.invoke([system, HumanMessage(content="What is 2 + 2?")])
-print(response.usage_metadata["input_token_details"]["cache_read"])  # tokens read from cache
 ```
 
 See the [prompt caching guide](https://docs.doubleword.ai/inference-api/prompt-caching).

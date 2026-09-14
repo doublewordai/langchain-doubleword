@@ -23,10 +23,16 @@ Three classes are exposed:
 
 from typing import Any, Literal
 
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.utils import from_env
 from langchain_openai.chat_models.base import BaseChatOpenAI
 from pydantic import ConfigDict, Field, SecretStr, model_validator
 
+from langchain_doubleword._cache import (
+    CacheOption,
+    apply_cache_control,
+    normalize_cache_config,
+)
 from langchain_doubleword._credentials import resolve_api_key
 
 DEFAULT_DOUBLEWORD_API_BASE = "https://api.doubleword.ai/v1"
@@ -57,6 +63,15 @@ class ChatDoubleword(BaseChatOpenAI):
         alias="base_url",
         default_factory=from_env("DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE),
     )
+    prompt_cache: CacheOption | None = Field(
+        default=None,
+        description=(
+            "Enable Doubleword prompt caching. `True` caches the system prefix "
+            "for 1h; pass `{'ttl': ..., 'scope': ...}` to tune it. Named "
+            "`prompt_cache` because `cache` is taken by LangChain's own "
+            "response cache."
+        ),
+    )
 
     @property
     def lc_secrets(self) -> dict[str, str]:
@@ -77,6 +92,20 @@ class ChatDoubleword(BaseChatOpenAI):
         # field, and forwards everything else verbatim. Strip nothing for now;
         # this hook exists so future divergences are easy to handle.
         return params
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        # The single hook every sync/async/streaming path funnels through, so
+        # stamping ``cache_control`` here covers them all. Left unset, the
+        # payload is forwarded untouched and hand-built ``cache_control``
+        # blocks still work.
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        return apply_cache_control(payload, normalize_cache_config(self.prompt_cache))
 
 
 class ChatDoublewordBatch(ChatDoubleword):
