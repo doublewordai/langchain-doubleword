@@ -1,224 +1,165 @@
-"""Unit tests for prompt caching.
+"""Unit tests for prompt caching. Pure payload transforms, no network."""
 
-Two layers: the pure payload transforms in ``_cache``, and the
-``ChatDoubleword._get_request_payload`` hook that drives them. Both run
-offline: nothing here touches the network.
-"""
-
-from typing import Any
+from typing import Any, Literal
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import ValidationError
 
-from langchain_doubleword import ChatDoubleword, ChatDoublewordAsync, ChatDoublewordBatch
-from langchain_doubleword._cache import (
-    CacheOption,
-    ResolvedCacheConfig,
-    apply_cache_control,
-    normalize_cache_config,
+from langchain_doubleword import (
+    CacheControl,
+    ChatDoubleword,
+    ChatDoublewordAsync,
+    ChatDoublewordBatch,
 )
+from langchain_doubleword._cache import apply_cache_control
 
-EPHEMERAL_1H = {"type": "ephemeral", "ttl": "1h"}
-EPHEMERAL_5M = {"type": "ephemeral", "ttl": "5m"}
+EPHEMERAL: CacheControl = {"type": "ephemeral"}
+EPHEMERAL_1H: CacheControl = {"type": "ephemeral", "ttl": "1h"}
+
+
+def _text(text: str, cache_control: CacheControl | None = None) -> dict[str, Any]:
+    block: dict[str, Any] = {"type": "text", "text": text}
+    if cache_control is not None:
+        block["cache_control"] = cache_control
+    return block
 
 
 def _payload(*messages: dict[str, Any]) -> dict[str, Any]:
     return {"model": "m", "messages": list(messages)}
 
 
-# ---------------------------------------------------------------------------
-# normalize_cache_config
-# ---------------------------------------------------------------------------
+def _contents(payload: dict[str, Any]) -> list[Any]:
+    return [message["content"] for message in payload["messages"]]
 
 
-@pytest.mark.parametrize(
-    ("option", "expected"),
-    [
-        (None, None),
-        (False, None),
-        (True, ResolvedCacheConfig(ttl="1h", scope="system")),
-        ({}, ResolvedCacheConfig(ttl="1h", scope="system")),
-        ({"ttl": "5m"}, ResolvedCacheConfig(ttl="5m", scope="system")),
-        ({"scope": "lastUser"}, ResolvedCacheConfig(ttl="1h", scope="lastUser")),
-        ({"ttl": "5m", "scope": [0, 2]}, ResolvedCacheConfig(ttl="5m", scope=[0, 2])),
-    ],
-)
-def test_normalize_fills_defaults_or_disables(
-    option: CacheOption | None,
-    expected: ResolvedCacheConfig | None,
-) -> None:
-    assert normalize_cache_config(option) == expected
-
-
-# ---------------------------------------------------------------------------
-# apply_cache_control
-# ---------------------------------------------------------------------------
-
-
-def test_system_scope_marks_last_system_message() -> None:
+def test_marks_last_system_and_latest_message() -> None:
     payload = _payload(
-        {"role": "system", "content": "old instructions"},
-        {"role": "system", "content": "big stable prompt"},
-        {"role": "user", "content": "hi"},
+        {"role": "system", "content": "old"},
+        {"role": "system", "content": "prefix"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"},
     )
-    apply_cache_control(payload, normalize_cache_config(True))
-
-    # String content is converted to the block form the endpoint expects.
-    assert payload["messages"][1]["content"] == [
-        {"type": "text", "text": "big stable prompt", "cache_control": EPHEMERAL_1H}
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload) == [
+        "old",
+        [_text("prefix", EPHEMERAL)],
+        "q1",
+        "a1",
+        [_text("q2", EPHEMERAL)],
     ]
-    # Every other message is left exactly as it arrived.
-    assert payload["messages"][0]["content"] == "old instructions"
-    assert payload["messages"][2]["content"] == "hi"
 
 
-def test_explicit_ttl_is_used() -> None:
+def test_system_that_is_also_latest_is_marked_once() -> None:
     payload = _payload({"role": "system", "content": "prefix"})
-    apply_cache_control(payload, normalize_cache_config({"ttl": "5m"}))
-    assert payload["messages"][0]["content"][0]["cache_control"] == EPHEMERAL_5M
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload) == [[_text("prefix", EPHEMERAL)]]
 
 
-def test_last_user_scope_marks_the_final_user_message() -> None:
+def test_without_system_only_latest_is_marked() -> None:
     payload = _payload(
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "ok"},
-        {"role": "user", "content": "second"},
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"},
     )
-    apply_cache_control(payload, normalize_cache_config({"scope": "lastUser"}))
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload) == ["q1", "a1", [_text("q2", EPHEMERAL)]]
 
-    assert payload["messages"][2]["content"] == [
-        {"type": "text", "text": "second", "cache_control": EPHEMERAL_1H}
+
+def test_marks_last_text_block_and_skips_targets_without_text() -> None:
+    image = {"type": "image_url", "image_url": {"url": "x"}}
+    payload = _payload(
+        {"role": "system", "content": [_text("a"), _text("b"), image]},
+        {"role": "user", "content": [image]},
+    )
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload) == [[_text("a"), _text("b", EPHEMERAL), image], [image]]
+
+
+def test_messages_with_existing_markers_are_untouched() -> None:
+    payload = _payload(
+        {"role": "system", "content": [_text("prefix", EPHEMERAL_1H), _text("rules")]},
+        {"role": "user", "content": "q"},
+    )
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload) == [
+        [_text("prefix", EPHEMERAL_1H), _text("rules")],
+        [_text("q", EPHEMERAL)],
     ]
-    assert payload["messages"][0]["content"] == "first"
 
 
-def test_index_scope_marks_the_last_text_block_of_each_index() -> None:
+def test_never_exceeds_four_breakpoints() -> None:
     payload = _payload(
         {"role": "system", "content": "prefix"},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "a"},
-                {"type": "text", "text": "b"},
-            ],
-        },
+        {"role": "user", "content": [_text("doc1", EPHEMERAL)]},
+        {"role": "user", "content": [_text("doc2", EPHEMERAL)]},
+        {"role": "user", "content": "q"},
     )
-    apply_cache_control(payload, normalize_cache_config({"scope": [0, 1]}))
-
-    assert payload["messages"][0]["content"][0]["cache_control"] == EPHEMERAL_1H
-    blocks = payload["messages"][1]["content"]
-    assert "cache_control" not in blocks[0]
-    assert blocks[1]["cache_control"] == EPHEMERAL_1H
+    payload["tools"] = [{"type": "function", "function": {"name": "t"}, "cache_control": EPHEMERAL}]
+    apply_cache_control(payload, EPHEMERAL)
+    assert _contents(payload)[0] == [_text("prefix", EPHEMERAL)]
+    assert _contents(payload)[3] == "q"
 
 
-def test_out_of_range_indices_are_dropped() -> None:
-    payload = _payload({"role": "user", "content": "hi"})
-    apply_cache_control(payload, normalize_cache_config({"scope": [5, -1]}))
-    assert payload["messages"][0]["content"] == "hi"
+def test_omitted_ttl_sends_no_ttl_key() -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control={"type": "ephemeral"})
+    payload = llm._get_request_payload([HumanMessage(content="q")])
+    assert payload["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 
-def test_disabled_is_a_no_op() -> None:
-    payload = _payload({"role": "system", "content": "prefix"})
-    apply_cache_control(payload, normalize_cache_config(False))
-    assert payload["messages"][0]["content"] == "prefix"
+@pytest.mark.parametrize("ttl", ["5m", "1h"])
+def test_ttl_passes_through(ttl: Literal["5m", "1h"]) -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control={"type": "ephemeral", "ttl": ttl})
+    payload = llm._get_request_payload([HumanMessage(content="q")])
+    assert payload["messages"][0]["content"][0]["cache_control"] == {
+        "type": "ephemeral",
+        "ttl": ttl,
+    }
 
 
-def test_missing_target_role_is_a_no_op() -> None:
-    """A conversation with no system message has nothing to mark."""
-    payload = _payload({"role": "user", "content": "hi"})
-    apply_cache_control(payload, normalize_cache_config(True))
-    assert payload["messages"][0]["content"] == "hi"
+def test_per_call_dict_overrides_the_field() -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control=EPHEMERAL)
+    payload = llm._get_request_payload([HumanMessage(content="q")], cache_control=EPHEMERAL_1H)
+    assert _contents(payload) == [[_text("q", EPHEMERAL_1H)]]
 
 
-def test_message_without_text_is_a_no_op() -> None:
-    payload = _payload(
-        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "x"}}]}
-    )
-    apply_cache_control(payload, normalize_cache_config({"scope": [0]}))
-    assert payload["messages"][0]["content"] == [{"type": "image_url", "image_url": {"url": "x"}}]
+def test_per_call_none_skips_caching() -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control=EPHEMERAL)
+    messages = [SystemMessage(content="prefix"), HumanMessage(content="q")]
+    assert _contents(llm._get_request_payload(messages, cache_control=None)) == ["prefix", "q"]
 
 
-def test_payload_without_messages_is_a_no_op() -> None:
-    payload: dict[str, Any] = {"model": "m"}
-    assert apply_cache_control(payload, normalize_cache_config(True)) == {"model": "m"}
-
-
-# ---------------------------------------------------------------------------
-# ChatDoubleword._get_request_payload
-# ---------------------------------------------------------------------------
-
-
-def test_payload_is_untouched_by_default() -> None:
-    """The hand-built route: no ``prompt_cache``, no rewriting."""
-    from langchain_core.messages import HumanMessage, SystemMessage
-
+def test_unset_field_leaves_payload_untouched() -> None:
     llm = ChatDoubleword(model="m", api_key="x")
-    system = SystemMessage(
-        content=[{"type": "text", "text": "prefix", "cache_control": EPHEMERAL_5M}]
-    )
-    payload = llm._get_request_payload([system, HumanMessage(content="hi")])
-
-    assert payload["messages"][0]["content"] == [
-        {"type": "text", "text": "prefix", "cache_control": EPHEMERAL_5M}
-    ]
-    assert payload["messages"][1]["content"] == "hi"
+    messages = [SystemMessage(content="prefix"), HumanMessage(content="q")]
+    assert _contents(llm._get_request_payload(messages)) == ["prefix", "q"]
 
 
-def test_user_supplied_markers_survive_an_enabled_cache() -> None:
-    """``prompt_cache`` marks its own target and leaves other markers alone."""
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    llm = ChatDoubleword(model="m", api_key="x", prompt_cache=True)
-    human = HumanMessage(content=[{"type": "text", "text": "q", "cache_control": EPHEMERAL_5M}])
-    payload = llm._get_request_payload([SystemMessage(content="prefix"), human])
-
-    assert payload["messages"][0]["content"] == [
-        {"type": "text", "text": "prefix", "cache_control": EPHEMERAL_1H}
-    ]
-    assert payload["messages"][1]["content"][0]["cache_control"] == EPHEMERAL_5M
+@pytest.mark.parametrize("override", [{}, {"cache_control": EPHEMERAL_1H}, {"cache_control": None}])
+def test_cache_control_is_never_a_top_level_parameter(override: dict[str, Any]) -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control=EPHEMERAL)
+    assert "cache_control" not in llm._get_request_payload([HumanMessage(content="q")], **override)
 
 
-def test_payload_honours_ttl_and_scope() -> None:
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    llm = ChatDoubleword(
-        model="m",
-        api_key="x",
-        prompt_cache={"ttl": "5m", "scope": "lastUser"},
-    )
-    payload = llm._get_request_payload(
-        [SystemMessage(content="prefix"), HumanMessage(content="hi")]
-    )
-
-    assert payload["messages"][0]["content"] == "prefix"
-    assert payload["messages"][1]["content"] == [
-        {"type": "text", "text": "hi", "cache_control": EPHEMERAL_5M}
-    ]
+def test_caller_messages_are_not_mutated() -> None:
+    llm = ChatDoubleword(model="m", api_key="x", cache_control=EPHEMERAL)
+    human = HumanMessage(content=[_text("q")])
+    llm._get_request_payload([human])
+    assert human.content == [_text("q")]
 
 
-def test_prompt_cache_rejects_a_bad_ttl() -> None:
-    from pydantic import ValidationError
-
+def test_rejects_unknown_ttl() -> None:
     with pytest.raises(ValidationError):
         ChatDoubleword(
             model="m",
             api_key="x",
-            prompt_cache={"ttl": "2h"},  # type: ignore[typeddict-item]
+            cache_control={"type": "ephemeral", "ttl": "2h"},  # type: ignore[typeddict-item]
         )
 
 
 @pytest.mark.parametrize("model_class", [ChatDoublewordBatch, ChatDoublewordAsync])
-def test_batch_variants_inherit_the_hook(
-    model_class: type[ChatDoublewordBatch],
-) -> None:
-    """``ChatDoublewordBatch`` / ``ChatDoublewordAsync`` subclass
-    ``ChatDoubleword``, so they pick up ``prompt_cache`` unchanged."""
-    from langchain_core.messages import HumanMessage, SystemMessage
-
-    llm = model_class(model="m", api_key="x", prompt_cache=True)
-    payload = llm._get_request_payload(
-        [SystemMessage(content="prefix"), HumanMessage(content="hi")]
-    )
-
-    assert payload["messages"][0]["content"] == [
-        {"type": "text", "text": "prefix", "cache_control": EPHEMERAL_1H}
-    ]
+def test_batch_and_async_inherit_the_hook(model_class: type[ChatDoubleword]) -> None:
+    llm = model_class(model="m", api_key="x", cache_control=EPHEMERAL)
+    payload = llm._get_request_payload([HumanMessage(content="q")])
+    assert _contents(payload) == [[_text("q", EPHEMERAL)]]

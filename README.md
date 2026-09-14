@@ -145,13 +145,11 @@ from `ChatDoublewordBatch` is the default `completion_window` (`"1h"` vs
 
 ## Prompt caching
 
-Pass `prompt_cache=True` to cache the system prefix and reuse it across calls:
-
 ```python
 from langchain_doubleword import ChatDoubleword
 from langchain_core.messages import SystemMessage, HumanMessage
 
-llm = ChatDoubleword(model="your-model-name", prompt_cache=True)
+llm = ChatDoubleword(model="your-model-name", cache_control={"type": "ephemeral", "ttl": "1h"})
 
 response = llm.invoke([
     SystemMessage(content="…large, stable instructions…"),
@@ -160,36 +158,13 @@ response = llm.invoke([
 print(response.usage_metadata["input_token_details"]["cache_read"])  # tokens read from cache
 ```
 
-`prompt_cache` accepts `True`, `False`, or a config dict:
+`ttl` is `"5m"` or `"1h"` and is optional. The API default is `"5m"`.
 
-| Key     | Values                                            | Default    |
-|---------|---------------------------------------------------|------------|
-| `ttl`   | `"5m"`, `"1h"`                                    | `"1h"`     |
-| `scope` | `"system"`, `"lastUser"`, list of message indices | `"system"` |
+The marker goes on the last system message and on the latest message of every request.
+Hand-built `cache_control` blocks on system and user messages still work for any other placement.
 
-```python
-llm = ChatDoubleword(
-    model="your-model-name",
-    prompt_cache={"ttl": "5m", "scope": "lastUser"},
-)
-```
-
-The field is named `prompt_cache` because LangChain already uses `cache` for its
-own response cache. `ChatDoublewordBatch` and `ChatDoublewordAsync` inherit it
-unchanged.
-
-To mark one specific message instead, attach `cache_control` to a content block
-yourself; `ChatDoubleword` forwards it verbatim:
-
-```python
-system = SystemMessage(content=[{
-    "type": "text",
-    "text": "…large, stable instructions…",
-    "cache_control": {"type": "ephemeral", "ttl": "1h"},
-}])
-
-response = llm.invoke([system, HumanMessage(content="What is 2 + 2?")])
-```
+Pass `cache_control` to `invoke` to override it for one call. `cache_control=None` skips caching
+for that call.
 
 See the [prompt caching guide](https://docs.doubleword.ai/inference-api/prompt-caching).
 

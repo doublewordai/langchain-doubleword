@@ -28,11 +28,7 @@ from langchain_core.utils import from_env
 from langchain_openai.chat_models.base import BaseChatOpenAI
 from pydantic import ConfigDict, Field, SecretStr, model_validator
 
-from langchain_doubleword._cache import (
-    CacheOption,
-    apply_cache_control,
-    normalize_cache_config,
-)
+from langchain_doubleword._cache import CacheControl, apply_cache_control
 from langchain_doubleword._credentials import resolve_api_key
 
 DEFAULT_DOUBLEWORD_API_BASE = "https://api.doubleword.ai/v1"
@@ -63,14 +59,9 @@ class ChatDoubleword(BaseChatOpenAI):
         alias="base_url",
         default_factory=from_env("DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE),
     )
-    prompt_cache: CacheOption | None = Field(
+    cache_control: CacheControl | None = Field(
         default=None,
-        description=(
-            "Enable Doubleword prompt caching. `True` caches the system prefix "
-            "for 1h; pass `{'ttl': ..., 'scope': ...}` to tune it. Named "
-            "`prompt_cache` because `cache` is taken by LangChain's own "
-            "response cache."
-        ),
+        description="Prompt caching marker for the last system message and the latest message.",
     )
 
     @property
@@ -100,12 +91,11 @@ class ChatDoubleword(BaseChatOpenAI):
         stop: list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        # The single hook every sync/async/streaming path funnels through, so
-        # stamping ``cache_control`` here covers them all. Left unset, the
-        # payload is forwarded untouched and hand-built ``cache_control``
-        # blocks still work.
+        cache_control = kwargs.pop("cache_control", self.cache_control)
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        return apply_cache_control(payload, normalize_cache_config(self.prompt_cache))
+        if cache_control is not None:
+            apply_cache_control(payload, cache_control)
+        return payload
 
 
 class ChatDoublewordBatch(ChatDoubleword):

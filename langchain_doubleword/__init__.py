@@ -7,6 +7,7 @@ transparently-batched variants powered by ``autobatcher``.
 
 from importlib import metadata
 
+from langchain_doubleword._cache import CacheControl
 from langchain_doubleword.chat_models import (
     DEFAULT_DOUBLEWORD_API_BASE,
     ChatDoubleword,
@@ -27,6 +28,7 @@ del metadata
 
 __all__ = [
     "DEFAULT_DOUBLEWORD_API_BASE",
+    "CacheControl",
     "ChatDoubleword",
     "ChatDoublewordAsync",
     "ChatDoublewordBatch",
