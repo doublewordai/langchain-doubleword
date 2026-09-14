@@ -9,7 +9,7 @@ chat / embedding models and **transparently-batched** variants powered by
 
 The batched variants are required to access models that Doubleword exposes
 **only via the batch API**, and they cut cost on workloads that fan out
-many concurrent calls — typically the case in LangGraph agents.
+many concurrent calls, which is typical of LangGraph agents.
 
 ## Installation
 
@@ -29,7 +29,7 @@ Three resolution paths, in precedence order:
    ```bash
    export DOUBLEWORD_API_KEY=sk-...
    ```
-3. **`~/.dw/credentials.toml`** — the same file written by Doubleword's CLI
+3. **`~/.dw/credentials.toml`**: the same file written by Doubleword's CLI
    tooling. The active account is selected by `~/.dw/config.toml`'s
    `active_account` field, and `inference_key` from that account is used.
 
@@ -44,7 +44,7 @@ Three resolution paths, in precedence order:
    ```
 
    To use a non-active account from your credentials file, set
-   `DOUBLEWORD_API_KEY` directly to that account's `inference_key` — there
+   `DOUBLEWORD_API_KEY` directly to that account's `inference_key`. There
    is no `account=` selector on the model itself.
 
 ## Chat models
@@ -66,7 +66,7 @@ print(response.content)
 ### `ChatDoublewordBatch` (transparently batched)
 
 Same interface, but every concurrent `.ainvoke()` call is collected by
-`autobatcher` and submitted via Doubleword's batch endpoint. **Async-only** —
+`autobatcher` and submitted via Doubleword's batch endpoint. **Async-only**:
 sync `.invoke()` raises.
 
 Use this when:
@@ -120,7 +120,7 @@ The same arguments are available on `DoublewordEmbeddingsBatch`.
 A thin subclass of `ChatDoublewordBatch` pinned to Doubleword's **flex
 (1-hour)** completion window. Backed by `autobatcher.AsyncOpenAI` rather
 than `BatchOpenAI`. Use this when 24-hour batch turnaround is too slow but
-realtime cost is too high — typical for fan-out workflows that need results
+realtime cost is too high, which is typical for fan-out workflows that need results
 within minutes-to-an-hour.
 
 ```python
@@ -155,7 +155,7 @@ response = llm.invoke([
     SystemMessage(content="…large, stable instructions…"),
     HumanMessage(content="What is 2 + 2?"),
 ])
-print(response.usage_metadata["input_token_details"]["cache_read"])  # tokens read from cache
+print(response.usage_metadata["input_token_details"]["cache_read"])
 ```
 
 `ttl` is `"5m"` or `"1h"` and is optional. The API default is `"5m"`.
@@ -220,7 +220,7 @@ edges), `autobatcher` collects their requests into a single batch.
 |-------------|----------------------|----------------------------------|
 | `api_key`   | `DOUBLEWORD_API_KEY` | _required_                       |
 | `base_url`  | `DOUBLEWORD_API_BASE`| `https://api.doubleword.ai/v1`   |
-| `model`     | —                    | _required_                       |
+| `model`     | n/a                  | _required_                       |
 
 All other arguments accepted by `langchain_openai.ChatOpenAI` are forwarded
 unchanged (`temperature`, `max_tokens`, `model_kwargs`, `timeout`, etc.).
