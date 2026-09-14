@@ -2,7 +2,7 @@
 
 [LangSmith](https://smith.langchain.com) is LangChain's cloud platform for tracing and evaluating LLM
 apps. The eval most worth running continuously is an LLM-as-judge that catches prompt and model
-regressions before they ship — and on Doubleword's batch tier it runs **7–27× cheaper** than the same
+regressions before they ship. On Doubleword's batch tier it runs **7–27× cheaper** than the same
 workload on a frontier model. The `langchain-doubleword` chat models are standard LangChain models, so
 Doubleword slots straight into LangSmith tracing and evals.
 
@@ -29,7 +29,7 @@ traces, tokens, and feedback scores; for the authoritative batch spend use the D
 
 One app answers a set of questions, a stronger model grades every answer against a reference on three
 axes (relevance, truthfulness, tone), and the scores land on a LangSmith experiment. Run it again
-after a prompt or model change and compare the experiments — if the scores drop, you've caught a
+after a prompt or model change and compare the experiments. If the scores drop, you've caught a
 regression. A complete
 [runnable example](https://github.com/doublewordai/langchain-doubleword/tree/master/examples/langsmith)
 judges an app on the batch tier and re-runs after a change to show the move.
@@ -41,8 +41,8 @@ grades the answer on relevance, truthfulness, and tone. Re-run after a change an
 
 When a prompt regresses the drop is obvious. The two prompts differ by one instruction set:
 
-- 😇 **baseline** — "Answer the question truthfully and concisely. If you are unsure, say so rather than guessing."
-- 🥴 **regressed** — "You are a confident, entertaining assistant. Always give a definitive, elaborate answer… Never admit uncertainty and never refuse."
+- 😇 **baseline**: "Answer the question truthfully and concisely. If you are unsure, say so rather than guessing."
+- 🥴 **regressed**: "You are a confident, entertaining assistant. Always give a definitive, elaborate answer… Never admit uncertainty and never refuse."
 
 The same eval on each, 50 examples over the same questions:
 
@@ -60,49 +60,51 @@ price.
 
 Setup takes a few minutes.
 
-### Step 1 — Sign up for LangSmith
+### Step 1: Sign up for LangSmith
 
 Create an account at [smith.langchain.com](https://smith.langchain.com). Pick a data region (US, EU,
-or APAC — this can't be changed later), then sign up with Google, GitHub, or email.
+or APAC, which can't be changed later), then sign up with Google, GitHub, or email.
 
 ![LangSmith sign-up](images/01_signup.jpeg)
 
-### Step 2 — Choose the code-first experience
+### Step 2: Choose the code-first experience
 
 LangSmith offers a code-first mode and a no-code mode (Fleet). For SDK tracing and evals with
 `langchain-doubleword`, choose **LangSmith**.
 
 ![Choose the LangSmith code-first experience](images/02_choose_langsmith_mode.jpeg)
 
-### Step 3 — Create an API key
+### Step 3: Create an API key
 
 Go to **Settings → API Keys** and click **+ API Key**. A Personal Access Token is fine for local
 use (choose a Service Key for CI). Name it, set an expiry, and click **Create API Key**.
 
 ![Create an API key](images/03_create_api_key.jpeg)
 
-The key is shown only once — copy it now. It starts with `lsv2_`.
+The key is shown only once, so copy it now. It starts with `lsv2_`.
 
 ![API key created](images/04_api_key_created.jpeg)
 
-### Step 4 — Install
+### Step 4: Install
 
 ```bash
 pip install langchain-doubleword langsmith
 ```
 
-### Step 5 — Authenticate
+### Step 5: Authenticate
+
+`DOUBLEWORD_API_KEY` comes from [API Keys](https://app.doubleword.ai/api-keys) and `LANGSMITH_API_KEY` is the key from Step 3.
 
 ```bash
-export DOUBLEWORD_API_KEY="sk-..."          # app.doubleword.ai → API Keys
-export LANGSMITH_API_KEY="lsv2_..."         # the key from Step 3
+export DOUBLEWORD_API_KEY="sk-..."
+export LANGSMITH_API_KEY="lsv2_..."
 export LANGSMITH_TRACING="true"
 export LANGSMITH_PROJECT="doubleword-langsmith"
-# Regional endpoint, if you picked EU/APAC in Step 1:
-# export LANGSMITH_ENDPOINT="https://eu.api.smith.langchain.com"
 ```
 
-### Step 6 — Trace a Doubleword model
+If you picked the EU or APAC region in Step 1, also set `LANGSMITH_ENDPOINT` to that region's API, for example `https://eu.api.smith.langchain.com`.
+
+### Step 6: Trace a Doubleword model
 
 With tracing on, every call is recorded in LangSmith under `LANGSMITH_PROJECT`:
 

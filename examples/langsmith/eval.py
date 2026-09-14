@@ -1,23 +1,9 @@
-"""LLM-as-judge regression eval in LangSmith, judged on Doubleword's batch tier.
-
-One app answers a dataset of questions; a reference-graded LLM judge scores every
-answer on three axes (relevance / truthfulness / tone) plus an overall pass. Re-run
-this whenever you change the app's prompt or model and watch the scores in LangSmith —
-that's your regression gate before production.
-
-Run two variants to see it work: ``baseline`` uses a healthy system prompt,
-``regressed`` swaps in a deliberately worse one, and the judge scores drop.
+"""LLM-as-judge regression eval in LangSmith on Doubleword.
 
     uv run python eval.py --variant baseline -n 50 -c 20
     uv run python eval.py --variant regressed -n 50 -c 20
 
-Defaults to the batch tier. Generation and judging each run as one batched
-``asyncio.gather`` pass, so the autobatcher collates the calls into a batch; a single
-``aevaluate`` then records each answer and its four judge scores (the target and the
-evaluator are pure lookups, so they add no model calls). The same eval runs on any
-tier — pass ``--tier async`` (high-throughput) or ``--tier realtime``. Authoritative batch
-cost: the Doubleword console or ``dw batches analytics <batch_id>``.
-
+Runs on the batch tier by default. Pass ``--tier async`` or ``--tier realtime`` to switch.
 Requires DOUBLEWORD_API_KEY and LANGSMITH_API_KEY (see .env.example).
 """
 from __future__ import annotations
@@ -38,19 +24,13 @@ from langsmith import Client
 from langsmith.evaluation import aevaluate
 from langsmith.schemas import Example, Run
 
-# The app under test, and the stronger model that grades it.
+# App under test and the judge model that grades it.
 APP_MODEL = os.environ.get("APP_MODEL", "openai/gpt-oss-20b")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "deepseek-ai/DeepSeek-V4-Pro")
 
-# Cap output so a reasoning model can't run away (unbounded, one of these can emit
-# thousands of tokens per call). Leave enough room for the model to think and still emit
-# its answer / JSON verdict — too low and a reasoning judge spends the whole budget
-# thinking and never returns the JSON.
+# Room for a reasoning model to think and still return its answer or JSON verdict.
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "2048"))
 
-# Tier -> chat-model class. batch (24h) is the cheapest, async is the high-throughput tier,
-# realtime is the standard endpoint. Every call here uses ``ainvoke``, which all three
-# support, so the same eval runs unchanged on any tier — pick it with --tier.
 TIERS = {
     "batch": ChatDoublewordBatch,
     "async": ChatDoublewordAsync,
@@ -61,8 +41,7 @@ TIERS = {
 app_model = None
 judge_model = None
 
-# Generation prompts. `regressed` is deliberately degraded so the judge scores drop —
-# a stand-in for the kind of prompt change that quietly ships a regression.
+# `regressed` is deliberately worse so the judge scores drop.
 SYSTEM_PROMPTS = {
     "baseline": (
         "Answer the question truthfully and concisely. If you are unsure, say so rather "
@@ -74,7 +53,7 @@ SYSTEM_PROMPTS = {
     ),
 }
 
-# Reference-graded judge on three axes, JSON only so the evaluator stays a pure lookup.
+# Reference-graded judge that returns JSON scores on three axes.
 JUDGE_PROMPT = (
     "You are a strict evaluator. Score an assistant's answer to a question against the "
     "reference answers, on three axes from 0.0 to 1.0:\n"
@@ -86,7 +65,7 @@ JUDGE_PROMPT = (
     '"rationale": str}.'
 )
 
-# Filled in as the run progresses, then read by the (pure-lookup) evaluator.
+# Filled during the run and read by the evaluator.
 generated: dict[str, str] = {}  # question -> app answer
 references: dict[str, str] = {}  # question -> reference answer
 verdicts: dict[str, dict] = {}  # question -> {relevance, truthfulness, tone, rationale}
@@ -166,11 +145,7 @@ def _passed(v: dict) -> bool:
 
 
 def judged(run: Run, example: Example) -> list[dict]:
-    """Pure-lookup evaluator: emits four feedback keys, no model calls.
-
-    Returning a list of dicts (each with a ``key``) makes LangSmith record several
-    feedback scores per example in one pass.
-    """
+    """Return four feedback scores per example with no model calls."""
     question = example.inputs["question"]
     v = verdicts.get(question)
     if v is None:
@@ -194,9 +169,7 @@ async def run_eval(variant: str, n: int, concurrency: int, tier: str) -> str:
         questions.append(q)
         references[q] = (ex.outputs or {}).get("answer", "")
 
-    # Generate, then judge. On batch/async, fire every call at once so the autobatcher
-    # collates them into one batch per stage. On realtime there's no batching, so bound
-    # in-flight calls with a semaphore to avoid hammering the endpoint.
+    # Batch and async fire every call at once. Realtime is bounded by a semaphore.
     sem = asyncio.Semaphore(concurrency) if tier == "realtime" else None
 
     async def guard(coro):
@@ -209,8 +182,7 @@ async def run_eval(variant: str, n: int, concurrency: int, tier: str) -> str:
     await asyncio.gather(*[guard(_generate_one(q, system)) for q in questions])
     await asyncio.gather(*[guard(_judge_one(q)) for q in questions])
 
-    # Record each answer and its four judge scores in one experiment. The target and the
-    # evaluator are pure lookups of the work above, so aevaluate adds no model calls.
+    # The target and evaluator are lookups, so aevaluate makes no model calls.
     async def target(inputs: dict) -> dict:
         return {"answer": generated.get(inputs["question"], "")}
 
@@ -224,7 +196,7 @@ async def run_eval(variant: str, n: int, concurrency: int, tier: str) -> str:
             max_concurrency=concurrency,
         )
         return res.experiment_name
-    except Exception as exc:  # e.g. LangSmith usage limit — scores are still computed below
+    except Exception as exc:  # e.g. a LangSmith usage limit
         print(f"(LangSmith logging failed: {exc})")
         return "(not logged)"
 
