@@ -23,10 +23,12 @@ Three classes are exposed:
 
 from typing import Any, Literal
 
+from langchain_core.language_models import LanguageModelInput
 from langchain_core.utils import from_env
 from langchain_openai.chat_models.base import BaseChatOpenAI
 from pydantic import ConfigDict, Field, SecretStr, model_validator
 
+from langchain_doubleword._cache import CacheControl, apply_cache_control
 from langchain_doubleword._credentials import resolve_api_key
 
 DEFAULT_DOUBLEWORD_API_BASE = "https://api.doubleword.ai/v1"
@@ -57,6 +59,10 @@ class ChatDoubleword(BaseChatOpenAI):
         alias="base_url",
         default_factory=from_env("DOUBLEWORD_API_BASE", default=DEFAULT_DOUBLEWORD_API_BASE),
     )
+    cache_control: CacheControl | None = Field(
+        default=None,
+        description="Prompt caching marker for the last system message and the latest message.",
+    )
 
     @property
     def lc_secrets(self) -> dict[str, str]:
@@ -77,6 +83,19 @@ class ChatDoubleword(BaseChatOpenAI):
         # field, and forwards everything else verbatim. Strip nothing for now;
         # this hook exists so future divergences are easy to handle.
         return params
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        cache_control = kwargs.pop("cache_control", self.cache_control)
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        if cache_control is not None:
+            apply_cache_control(payload, cache_control)
+        return payload
 
 
 class ChatDoublewordBatch(ChatDoubleword):

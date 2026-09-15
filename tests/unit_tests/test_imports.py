@@ -3,6 +3,7 @@
 from langchain_doubleword import __all__
 
 EXPECTED = {
+    "CacheControl",
     "ChatDoubleword",
     "ChatDoublewordBatch",
     "DoublewordEmbeddings",
