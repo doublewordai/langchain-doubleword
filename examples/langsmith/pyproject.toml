@@ -1,0 +1,17 @@
+[project]
+name = "doubleword-langsmith"
+version = "0.1.0"
+description = "Run LLM-as-judge evaluations in LangSmith using Doubleword batch models"
+requires-python = ">=3.11"
+dependencies = [
+    "langchain-doubleword",
+    "langsmith>=0.3.0",
+    "datasets>=3.0.0",
+    "python-dotenv>=1.0.1",
+]
+
+[tool.uv.sources]
+langchain-doubleword = { path = "../..", editable = true }
+
+[tool.uv]
+package = false
