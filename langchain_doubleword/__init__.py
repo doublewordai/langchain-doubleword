@@ -23,7 +23,7 @@ from langchain_doubleword.embeddings import (
 try:
     __version__ = metadata.version(__package__ or "langchain-doubleword")
 except metadata.PackageNotFoundError:
-    __version__ = "0.1.1"
+    __version__ = "0.4.0"
 del metadata
 
 __all__ = [
